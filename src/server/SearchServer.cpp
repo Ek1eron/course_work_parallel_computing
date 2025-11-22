@@ -74,7 +74,7 @@ void SearchServer::sendAll(int sock, const std::string& data) {
 }
 
 void SearchServer::handleClient(int clientSock) {
-    auto t0 = std::chrono::high_resolution_clock::now();
+    auto clientStart = std::chrono::high_resolution_clock::now();
 
     try {
         std::string request = recvLine(clientSock);
@@ -93,9 +93,16 @@ void SearchServer::handleClient(int clientSock) {
         std::transform(cmd.begin(), cmd.end(), cmd.begin(),
                        [](unsigned char c){ return (char)std::toupper(c); });
 
+        auto cmdStart = std::chrono::high_resolution_clock::now();
+
         if (cmd == "HELLO") {
             std::cout << "[Server] Command HELLO\n";
             sendAll(clientSock, "HELLO_OK Server is alive!\n");
+
+            auto cmdEnd = std::chrono::high_resolution_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(cmdEnd - cmdStart).count();
+            std::cout << "[Server] HELLO time: " << ms << " ms\n";
+
             closesocket(clientSock);
             return;
         }
@@ -107,6 +114,11 @@ void SearchServer::handleClient(int clientSock) {
             out << "documents: " << index_.totalDocuments() << "\n";
             out << "unique_words: " << index_.totalWords() << "\n";
             sendAll(clientSock, out.str());
+
+            auto cmdEnd = std::chrono::high_resolution_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(cmdEnd - cmdStart).count();
+            std::cout << "[Server] INFO time: " << ms << " ms\n";
+
             closesocket(clientSock);
             return;
         }
@@ -118,11 +130,17 @@ void SearchServer::handleClient(int clientSock) {
 
             if (phrase.empty()) {
                 sendAll(clientSock, "ERROR phrase is empty\n");
+
+                auto cmdEnd = std::chrono::high_resolution_clock::now();
+                double ms = std::chrono::duration<double, std::milli>(cmdEnd - cmdStart).count();
+                std::cout << "[Server] SEARCH_PHRASE (bad) time: " << ms << " ms\n";
+
                 closesocket(clientSock);
                 return;
             }
 
             std::cout << "[Server] Command SEARCH_PHRASE: \"" << phrase << "\"\n";
+
             auto docs = index_.searchPhrase(phrase);
             std::cout << "[Server] Phrase results: " << docs.size() << " docs\n";
 
@@ -131,6 +149,11 @@ void SearchServer::handleClient(int clientSock) {
             for (int id : docs) out << index_.docPath(id) << "\n";
 
             sendAll(clientSock, out.str());
+
+            auto cmdEnd = std::chrono::high_resolution_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(cmdEnd - cmdStart).count();
+            std::cout << "[Server] SEARCH_PHRASE time: " << ms << " ms\n";
+
             closesocket(clientSock);
             return;
         }
@@ -141,11 +164,17 @@ void SearchServer::handleClient(int clientSock) {
 
             if (word.empty()) {
                 sendAll(clientSock, "ERROR Bad request. Use: SEARCH <word>\n");
+
+                auto cmdEnd = std::chrono::high_resolution_clock::now();
+                double ms = std::chrono::duration<double, std::milli>(cmdEnd - cmdStart).count();
+                std::cout << "[Server] SEARCH (bad) time: " << ms << " ms\n";
+
                 closesocket(clientSock);
                 return;
             }
 
             std::cout << "[Server] Command SEARCH: " << word << "\n";
+
             auto docs = index_.search(word);
             std::cout << "[Server] Word results: " << docs.size() << " docs\n";
 
@@ -154,21 +183,35 @@ void SearchServer::handleClient(int clientSock) {
             for (int id : docs) out << index_.docPath(id) << "\n";
 
             sendAll(clientSock, out.str());
+
+            auto cmdEnd = std::chrono::high_resolution_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(cmdEnd - cmdStart).count();
+            std::cout << "[Server] SEARCH time: " << ms << " ms\n";
+
             closesocket(clientSock);
             return;
         }
 
         std::cout << "[Server] Unknown command: " << cmd << "\n";
         sendAll(clientSock, "ERROR Unknown command\n");
+
+        auto cmdEnd = std::chrono::high_resolution_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(cmdEnd - cmdStart).count();
+        std::cout << "[Server] UNKNOWN time: " << ms << " ms\n";
     }
     catch (const std::exception& e) {
+        auto errEnd = std::chrono::high_resolution_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(errEnd - clientStart).count();
+
         std::cout << "[Server] Exception: " << e.what() << "\n";
+        std::cout << "[Server] EXCEPTION time: " << ms << " ms\n";
+
         sendAll(clientSock, std::string("ERROR ") + e.what() + "\n");
     }
 
-    auto t1 = std::chrono::high_resolution_clock::now();
-    double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    std::cout << "[Server] Client handled in " << ms << " ms\n";
+    auto clientEnd = std::chrono::high_resolution_clock::now();
+    double totalMs = std::chrono::duration<double, std::milli>(clientEnd - clientStart).count();
+    std::cout << "[Server] Client total time: " << totalMs << " ms\n";
 
     closesocket(clientSock);
 }

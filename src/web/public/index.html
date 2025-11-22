@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="uk">
+<head>
+    <meta charset="utf-8"/>
+    <title>Parallel Search Web Client</title>
+    <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="container">
+    <h1>Search Client</h1>
+
+    <div class="row">
+        <button id="helloBtn">HELLO</button>
+        <button id="infoBtn">INFO</button>
+    </div>
+
+    <div class="row">
+        <input id="queryInput" placeholder="word або фраза..." />
+        <select id="modeSelect">
+            <option value="word">SEARCH (word)</option>
+            <option value="phrase">SEARCH_PHRASE (phrase)</option>
+        </select>
+        <button id="searchBtn">SEARCH</button>
+    </div>
+
+    <pre id="output"></pre>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
