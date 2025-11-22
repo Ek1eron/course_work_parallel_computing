@@ -8,4 +8,8 @@ file(GLOB_RECURSE SOURCES
         "src/*.cpp"
 )
 
-add_executable(coursework ${SOURCES})
+add_executable(coursework ${SOURCES}
+        src/concurrent/ConcurrentMap.h
+        src/concurrent/ConcurrentMap.cpp
+        src/threading/ThreadPool.cpp
+        src/threading/ThreadPool.h)

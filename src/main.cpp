@@ -25,7 +25,8 @@ int main() {
 
     std::cout << "Loaded " << docId << " documents.\n";
 
-    idx.build();
+    int N = 8;
+    idx.build(N);
     std::cout << "Index built!\n";
 
     while (true) {
