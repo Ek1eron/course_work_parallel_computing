@@ -2,6 +2,7 @@
 
 ThreadPool::ThreadPool(size_t threads) {
     workers_.reserve(threads);
+
     for (size_t i = 0; i < threads; ++i) {
         workers_.emplace_back([this]() {
             while (true) {
@@ -30,7 +31,9 @@ ThreadPool::~ThreadPool() {
         std::lock_guard<std::mutex> lock(queueMutex_);
         stop_ = true;
     }
+
     condition_.notify_all();
+
     for (auto& w : workers_) {
         if (w.joinable()) w.join();
     }
