@@ -1,0 +1,11 @@
+# build
+cmake-build-*/
+
+# IDE
+.idea/
+
+# data directory (do not upload big datasets!)
+data/
+
+# logs
+*.log
