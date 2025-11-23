@@ -1,26 +1,59 @@
 #include <iostream>
 #include <string>
+#include <vector>
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #pragma comment(lib, "ws2_32.lib")
 
-static std::string recvAll(SOCKET sock) {
-    std::string res;
-    char buf[1024];
+struct LineReader {
+    std::string buf;
 
-    while (true) {
-        int n = recv(sock, buf, 1024, 0);
-        if (n <= 0) break;
-        res.append(buf, n);
-        if (n < 1024) break;
+    std::string recvLine(SOCKET sock) {
+        char tmp[512];
+
+        while (true) {
+            auto pos = buf.find('\n');
+            if (pos != std::string::npos) {
+                std::string line = buf.substr(0, pos);
+                buf.erase(0, pos + 1);
+
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                return line;
+            }
+
+            int n = recv(sock, tmp, (int)sizeof(tmp), 0);
+            if (n <= 0) {
+                std::string line = buf;
+                buf.clear();
+                if (!line.empty() && line.back() == '\r')
+                    line.pop_back();
+                return line;
+            }
+
+            buf.append(tmp, tmp + n);
+        }
     }
-    return res;
+};
+
+static bool sendAll(SOCKET sock, const std::string& data) {
+    size_t total = 0;
+    while (total < data.size()) {
+        int n = send(sock, data.data() + total,
+                     (int)(data.size() - total), 0);
+        if (n <= 0) return false;
+        total += (size_t)n;
+    }
+    return true;
 }
 
 int main() {
     WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        std::cerr << "WSAStartup failed\n";
+        return 1;
+    }
 
     std::string host = "127.0.0.1";
     int port = 8080;
@@ -31,6 +64,7 @@ int main() {
         std::getline(std::cin, cmd);
 
         if (cmd == "exit") break;
+        if (cmd.empty()) continue;
 
         SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if (sock == INVALID_SOCKET) {
@@ -40,7 +74,7 @@ int main() {
 
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
+        addr.sin_port = htons((u_short)port);
         inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
 
         if (connect(sock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
@@ -50,10 +84,42 @@ int main() {
         }
 
         std::string msg = cmd + "\n";
-        send(sock, msg.c_str(), (int)msg.size(), 0);
+        if (!sendAll(sock, msg)) {
+            std::cerr << "Send failed\n";
+            closesocket(sock);
+            continue;
+        }
 
-        std::string response = recvAll(sock);
-        std::cout << "Server response:\n" << response << "\n";
+        LineReader reader;
+        std::vector<std::string> lines;
+
+        while (true) {
+            std::string line = reader.recvLine(sock);
+            if (line.empty()) break;
+            if (line.rfind("WAIT", 0) == 0 || line.rfind("QUEUE", 0) == 0) {
+                std::cout << "[Client] " << line << "\n";
+                continue;
+            }
+            lines.push_back(line);
+            break;
+        }
+
+        while (true) {
+            std::string line = reader.recvLine(sock);
+            if (line.empty()) break;
+            if (line.rfind("WAIT", 0) == 0 || line.rfind("QUEUE", 0) == 0) {
+                std::cout << "[Client] " << line << "\n";
+                continue;
+            }
+            lines.push_back(line);
+        }
+
+        if (!lines.empty()) {
+            std::cout << "Server response:\n";
+            for (auto& l : lines) std::cout << l << "\n";
+        } else {
+            std::cout << "No response (server closed connection)\n";
+        }
 
         closesocket(sock);
     }

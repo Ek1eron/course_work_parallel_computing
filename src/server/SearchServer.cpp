@@ -10,8 +10,11 @@
 #include <cctype>
 #include <chrono>
 
-SearchServer::SearchServer(InvertedIndex& index, int port, int workerThreads)
-    : index_(index), port_(port), pool_(workerThreads) {}
+SearchServer::SearchServer(InvertedIndex& index, int port, int workerThreads, int maxClients)
+    : index_(index),
+      port_(port),
+      pool_(workerThreads),
+      maxClients_(maxClients) {}
 
 void SearchServer::initWinSock() {
     WSADATA wsaData;
@@ -23,7 +26,7 @@ void SearchServer::cleanupWinSock() {
     WSACleanup();
 }
 
-int SearchServer::createListenSocket() {
+SOCKET SearchServer::createListenSocket() {
     SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listenSock == INVALID_SOCKET)
         throw std::runtime_error("socket() failed");
@@ -47,33 +50,71 @@ int SearchServer::createListenSocket() {
         throw std::runtime_error("listen() failed");
     }
 
-    return (int)listenSock;
+    return listenSock;
 }
 
-std::string SearchServer::recvLine(int sock) {
+std::string SearchServer::recvLine(SOCKET sock) {
     std::string line;
-    char ch;
+    char buf[512];
 
     while (true) {
-        int n = recv(sock, &ch, 1, 0);
+        int n = recv(sock, buf, (int)sizeof(buf), 0);
         if (n <= 0) break;
-        if (ch == '\n') break;
-        if (ch != '\r') line.push_back(ch);
+
+        for (int i = 0; i < n; ++i) {
+            char ch = buf[i];
+            if (ch == '\n') return line;
+            if (ch != '\r') line.push_back(ch);
+        }
+        if (line.size() > 64 * 1024) break;
     }
+
     return line;
 }
 
-void SearchServer::sendAll(int sock, const std::string& data) {
+void SearchServer::sendAll(SOCKET sock, const std::string& data) {
     size_t total = 0;
     while (total < data.size()) {
-        int n = send(sock, data.data() + total,
-                     (int)(data.size() - total), 0);
+        int n = send(sock,
+                     data.data() + total,
+                     (int)(data.size() - total),
+                     0);
         if (n <= 0) break;
         total += (size_t)n;
     }
 }
 
-void SearchServer::handleClient(int clientSock) {
+void SearchServer::queueLoop() {
+    using namespace std::chrono_literals;
+
+    while (running_) {
+        std::this_thread::sleep_for(10s);
+
+        std::unique_lock<std::mutex> lk(queueMtx_);
+
+        for (size_t i = 0; i < waitQueue_.size(); ++i) {
+            SOCKET sock = waitQueue_[i];
+            sendAll(sock, "QUEUE " + std::to_string(i + 1) + "\n");
+        }
+
+        while (running_ &&
+               activeClients_.load() < maxClients_ &&
+               !waitQueue_.empty()) {
+
+            SOCKET sock = waitQueue_.front();
+            waitQueue_.pop_front();
+            activeClients_++;
+
+            pool_.enqueue([this, sock]() {
+                handleClient(sock);
+                activeClients_--;
+                return 0;
+            });
+        }
+    }
+}
+
+void SearchServer::handleClient(SOCKET clientSock) {
     auto clientStart = std::chrono::high_resolution_clock::now();
 
     try {
@@ -219,10 +260,13 @@ void SearchServer::handleClient(int clientSock) {
 void SearchServer::run() {
     initWinSock();
 
-    SOCKET listenSock = (SOCKET)createListenSocket();
+    SOCKET listenSock = createListenSocket();
     running_ = true;
 
-    std::cout << "[Server] Listening on port " << port_ << "...\n";
+    std::cout << "[Server] Listening on port " << port_
+              << " (maxClients=" << maxClients_ << ")...\n";
+
+    queueThread_ = std::thread([this]() { queueLoop(); });
 
     while (running_) {
         sockaddr_in clientAddr{};
@@ -241,10 +285,25 @@ void SearchServer::run() {
         std::cout << "[Server] Client connected from "
                   << ipStr << ":" << clientPort << "\n";
 
-        pool_.enqueue([this, clientSock]() {
-            handleClient((int)clientSock);
-            return 0;
-        });
+        std::unique_lock<std::mutex> lk(queueMtx_);
+
+        if (activeClients_.load() < maxClients_) {
+            activeClients_++;
+
+            pool_.enqueue([this, clientSock]() {
+                handleClient(clientSock);
+                activeClients_--;
+                return 0;
+            });
+
+        } else {
+            waitQueue_.push_back(clientSock);
+            sendAll(clientSock,
+                    "WAIT " + std::to_string(waitQueue_.size()) + "\n");
+
+            std::cout << "[Server] Client pushed to queue. Queue size="
+                      << waitQueue_.size() << "\n";
+        }
     }
 
     closesocket(listenSock);
@@ -253,4 +312,5 @@ void SearchServer::run() {
 
 void SearchServer::stop() {
     running_ = false;
+    if (queueThread_.joinable()) queueThread_.join();
 }

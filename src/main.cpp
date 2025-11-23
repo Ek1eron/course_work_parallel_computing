@@ -18,7 +18,7 @@ int main() {
 
     idx.build(32);
 
-    SearchServer server(idx, 8080, 32);
+    SearchServer server(idx, 8080, 1024, 1024);
     server.run();
 
     return 0;

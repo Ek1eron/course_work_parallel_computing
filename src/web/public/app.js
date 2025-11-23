@@ -4,14 +4,27 @@ function show(text) {
     out.textContent = text;
 }
 
+async function request(url) {
+    try {
+        const r = await fetch(url, {
+            method: "GET",
+            cache: "no-store",
+            headers: {
+                "Accept": "text/plain"
+            }
+        });
+        return await r.text();
+    } catch (e) {
+        return "Network error: " + e;
+    }
+}
+
 document.getElementById("helloBtn").onclick = async () => {
-    const r = await fetch("/hello");
-    show(await r.text());
+    show(await request("/hello"));
 };
 
 document.getElementById("infoBtn").onclick = async () => {
-    const r = await fetch("/info");
-    show(await r.text());
+    show(await request("/info"));
 };
 
 document.getElementById("searchBtn").onclick = async () => {
@@ -23,6 +36,5 @@ document.getElementById("searchBtn").onclick = async () => {
         ? `/search?q=${encodeURIComponent(q)}`
         : `/search_phrase?q=${encodeURIComponent(q)}`;
 
-    const r = await fetch(url);
-    show(await r.text());
+    show(await request(url));
 };
