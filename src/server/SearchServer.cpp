@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <vector>
 
 SearchServer::SearchServer(InvertedIndex& index, int port, int workerThreads, int maxClients)
     : index_(index),
@@ -27,8 +28,8 @@ void SearchServer::cleanupWinSock() {
 }
 
 SOCKET SearchServer::createListenSocket() {
-    SOCKET listenSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (listenSock == INVALID_SOCKET)
+    SOCKET ls = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (ls == INVALID_SOCKET)
         throw std::runtime_error("socket() failed");
 
     sockaddr_in addr{};
@@ -37,20 +38,20 @@ SOCKET SearchServer::createListenSocket() {
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     int opt = 1;
-    setsockopt(listenSock, SOL_SOCKET, SO_REUSEADDR,
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR,
                (const char*)&opt, sizeof(opt));
 
-    if (bind(listenSock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        closesocket(listenSock);
+    if (bind(ls, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(ls);
         throw std::runtime_error("bind() failed");
     }
 
-    if (listen(listenSock, SOMAXCONN) == SOCKET_ERROR) {
-        closesocket(listenSock);
+    if (listen(ls, SOMAXCONN) == SOCKET_ERROR) {
+        closesocket(ls);
         throw std::runtime_error("listen() failed");
     }
 
-    return listenSock;
+    return ls;
 }
 
 std::string SearchServer::recvLine(SOCKET sock) {
@@ -73,31 +74,47 @@ std::string SearchServer::recvLine(SOCKET sock) {
 }
 
 void SearchServer::sendAll(SOCKET sock, const std::string& data) {
+    trySendAll(sock, data);
+}
+
+bool SearchServer::trySendAll(SOCKET sock, const std::string& data) {
     size_t total = 0;
     while (total < data.size()) {
         int n = send(sock,
                      data.data() + total,
                      (int)(data.size() - total),
                      0);
-        if (n <= 0) break;
+        if (n <= 0) return false;
         total += (size_t)n;
     }
+    return true;
 }
 
 void SearchServer::queueLoop() {
     using namespace std::chrono_literals;
 
-    while (running_) {
-        std::this_thread::sleep_for(10s);
-
+    while (running_.load()) {
         std::unique_lock<std::mutex> lk(queueMtx_);
+        queueCv_.wait_for(lk, 10s, [this]() { return !running_.load(); });
+        if (!running_.load()) break;
 
-        for (size_t i = 0; i < waitQueue_.size(); ++i) {
-            SOCKET sock = waitQueue_[i];
-            sendAll(sock, "QUEUE " + std::to_string(i + 1) + "\n");
+        std::vector<SOCKET> snapshot(waitQueue_.begin(), waitQueue_.end());
+        lk.unlock();
+
+        for (size_t i = 0; i < snapshot.size(); ++i) {
+            SOCKET sock = snapshot[i];
+            if (!trySendAll(sock, "QUEUE " + std::to_string(i + 1) + "\n")) {
+                std::lock_guard<std::mutex> g(queueMtx_);
+                auto it = std::find(waitQueue_.begin(), waitQueue_.end(), sock);
+                if (it != waitQueue_.end()) {
+                    closesocket(sock);
+                    waitQueue_.erase(it);
+                }
+            }
         }
 
-        while (running_ &&
+        lk.lock();
+        while (running_.load() &&
                activeClients_.load() < maxClients_ &&
                !waitQueue_.empty()) {
 
@@ -260,21 +277,24 @@ void SearchServer::handleClient(SOCKET clientSock) {
 void SearchServer::run() {
     initWinSock();
 
-    SOCKET listenSock = createListenSocket();
-    running_ = true;
+    listenSock_ = createListenSocket();
+    running_.store(true);
 
     std::cout << "[Server] Listening on port " << port_
               << " (maxClients=" << maxClients_ << ")...\n";
 
     queueThread_ = std::thread([this]() { queueLoop(); });
 
-    while (running_) {
+    while (running_.load()) {
         sockaddr_in clientAddr{};
         int addrLen = sizeof(clientAddr);
 
-        SOCKET clientSock = accept(listenSock, (sockaddr*)&clientAddr, &addrLen);
+        SOCKET clientSock = accept(listenSock_, (sockaddr*)&clientAddr, &addrLen);
+
+        if (!running_.load()) break;
+
         if (clientSock == INVALID_SOCKET) {
-            if (running_) std::cerr << "[Server] accept() failed\n";
+            if (running_.load()) std::cerr << "[Server] accept() failed\n";
             continue;
         }
 
@@ -298,19 +318,31 @@ void SearchServer::run() {
 
         } else {
             waitQueue_.push_back(clientSock);
-            sendAll(clientSock,
-                    "WAIT " + std::to_string(waitQueue_.size()) + "\n");
+            trySendAll(clientSock,
+                       "WAIT " + std::to_string(waitQueue_.size()) + "\n");
 
             std::cout << "[Server] Client pushed to queue. Queue size="
                       << waitQueue_.size() << "\n";
         }
     }
 
-    closesocket(listenSock);
+    if (listenSock_ != INVALID_SOCKET) {
+        closesocket(listenSock_);
+        listenSock_ = INVALID_SOCKET;
+    }
     cleanupWinSock();
 }
 
 void SearchServer::stop() {
-    running_ = false;
-    if (queueThread_.joinable()) queueThread_.join();
+    running_.store(false);
+
+    queueCv_.notify_all();
+
+    if (listenSock_ != INVALID_SOCKET) {
+        closesocket(listenSock_);
+        listenSock_ = INVALID_SOCKET;
+    }
+
+    if (queueThread_.joinable())
+        queueThread_.join();
 }

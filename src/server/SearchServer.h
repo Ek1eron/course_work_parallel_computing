@@ -32,14 +32,18 @@ private:
     std::condition_variable queueCv_;
     std::thread queueThread_;
 
-    bool running_ = false;
+    std::atomic<bool> running_{false};
+
+    SOCKET listenSock_ = INVALID_SOCKET;
 
     void handleClient(SOCKET clientSock);
     void queueLoop();
 
     SOCKET createListenSocket();
     static std::string recvLine(SOCKET sock);
+
     static void sendAll(SOCKET sock, const std::string& data);
+    static bool trySendAll(SOCKET sock, const std::string& data);
 
     static void initWinSock();
     static void cleanupWinSock();
