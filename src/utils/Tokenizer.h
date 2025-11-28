@@ -2,7 +2,8 @@
 #include <string>
 #include <vector>
 
-class Tokenizer {
+class Tokenizer
+{
 public:
     static std::vector<std::string> tokenize(const std::string& text);
 };

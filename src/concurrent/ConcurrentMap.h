@@ -5,7 +5,8 @@
 #include <vector>
 #include <mutex>
 
-class ConcurrentMap {
+class ConcurrentMap
+{
 public:
     explicit ConcurrentMap(size_t shards = 32);
 
@@ -18,7 +19,8 @@ public:
     void clear();
 
 private:
-    struct Shard {
+    struct Shard
+    {
         mutable std::mutex mtx;
         std::unordered_map<std::string, std::unordered_set<int>> map;
     };

@@ -12,7 +12,8 @@
 #include "../index/InvertedIndex.h"
 #include "../threading/ThreadPool.h"
 
-class SearchServer {
+class SearchServer
+{
 public:
     SearchServer(InvertedIndex& index, int port, int workerThreads, int maxClients);
 

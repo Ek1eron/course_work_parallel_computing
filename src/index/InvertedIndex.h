@@ -5,7 +5,8 @@
 
 #include "../concurrent/ConcurrentMap.h"
 
-class InvertedIndex {
+class InvertedIndex
+{
 public:
     void addDocument(int docId, const std::string& path);
 

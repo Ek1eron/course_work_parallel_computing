@@ -5,11 +5,13 @@
 
 namespace fs = std::filesystem;
 
-int main() {
+int main()
+{
     InvertedIndex idx;
 
     int docId = 0;
-    for (auto& p : fs::recursive_directory_iterator("data")) {
+    for (auto& p : fs::recursive_directory_iterator("data"))
+    {
         if (p.is_regular_file() && p.path().extension() == ".txt")
             idx.addDocument(docId++, p.path().string());
     }

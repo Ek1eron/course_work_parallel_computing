@@ -3,9 +3,11 @@
 #include <sstream>
 #include <stdexcept>
 
-std::string FileLoader::readAll(const std::string& filePath) {
+std::string FileLoader::readAll(const std::string& filePath)
+{
     std::ifstream in(filePath);
-    if (!in.is_open()) {
+    if (!in.is_open())
+    {
         throw std::runtime_error("Cannot open file: " + filePath);
     }
 

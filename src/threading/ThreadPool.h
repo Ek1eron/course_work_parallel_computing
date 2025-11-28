@@ -4,16 +4,17 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
-#include <future>
 #include <functional>
+#include <stdexcept>
 
-class ThreadPool {
+class ThreadPool
+{
 public:
     explicit ThreadPool(size_t threads);
     ~ThreadPool();
 
     template<class F>
-    auto enqueue(F&& f) -> std::future<decltype(f())>;
+    void enqueue(F&& f);
 
 private:
     std::vector<std::thread> workers_;
@@ -25,20 +26,17 @@ private:
 };
 
 template<class F>
-auto ThreadPool::enqueue(F&& f) -> std::future<decltype(f())> {
-    using RetType = decltype(f());
-
-    auto taskPtr = std::make_shared<std::packaged_task<RetType()>>(std::forward<F>(f));
-    std::future<RetType> res = taskPtr->get_future();
-
+void ThreadPool::enqueue(F&& f)
+{
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
-        if (stop_) {
+        if (stop_)
+        {
             throw std::runtime_error("enqueue on stopped ThreadPool");
         }
-        tasks_.emplace([taskPtr]() { (*taskPtr)(); });
+
+        tasks_.emplace(std::forward<F>(f));
     }
 
     condition_.notify_one();
-    return res;
 }
